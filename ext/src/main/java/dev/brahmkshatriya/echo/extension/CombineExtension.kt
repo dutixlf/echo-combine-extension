@@ -21,7 +21,6 @@ import dev.brahmkshatriya.echo.common.models.Album
 import dev.brahmkshatriya.echo.common.models.Artist
 import dev.brahmkshatriya.echo.common.models.EchoMediaItem
 import dev.brahmkshatriya.echo.common.models.Feed
-import dev.brahmkshatriya.echo.common.models.Feed.Companion.toFeed
 import dev.brahmkshatriya.echo.common.models.Playlist
 import dev.brahmkshatriya.echo.common.models.Radio
 import dev.brahmkshatriya.echo.common.models.Shelf
@@ -53,27 +52,55 @@ class CombineExtension : ExtensionClient, MusicExtensionsProvider,
     }
 
     override suspend fun getSettingItems(): List<Setting> {
-        val extensions = extensionsFlow.value ?: emptyList()
+        val extensions = awaitExtensions()
         val extIds = extensions.map { it.id }
         val extNames = extensions.map { it.name }
-        return listOf(
+
+        val altIds = listOf("none") + extIds
+        val altNames = listOf("None") + extNames
+
+        val settingsList = mutableListOf<Setting>(
             SettingList(
                 "Metadata Extension",
                 KEY_METADATA_EXT,
                 "Extension to use for metadata (search, feed, album info, etc.)",
-                extNames, // entryTitles
-                extIds,   // entryValues
+                extNames,
+                extIds,
                 0
             ),
             SettingList(
-                "Stream Extension",
+                "Preferred Stream Extension",
                 KEY_STREAM_EXT,
-                "Extension to use for audio streaming",
-                extNames, // entryTitles
-                extIds,   // entryValues
+                "The primary extension to use for audio streaming",
+                extNames,
+                extIds,
                 0
             )
         )
+
+        var lastKey = KEY_STREAM_EXT
+        val suffixes = listOf("2nd", "3rd", "4th", "5th")
+        for (i in suffixes.indices) {
+            val value = runCatching { settings.getString(lastKey) }.getOrNull()
+            if (value != null && value != "none") {
+                val currentKey = "${KEY_STREAM_EXT}_${i + 1}"
+                settingsList.add(
+                    SettingList(
+                        "${suffixes[i]} Alternative Stream Extension",
+                        currentKey,
+                        "Backup extension if the previous ones fail to find the track",
+                        altNames,
+                        altIds,
+                        0
+                    )
+                )
+                lastKey = currentKey
+            } else {
+                break
+            }
+        }
+
+        return settingsList
     }
 
     // --- MusicExtensionsProvider ---
@@ -93,15 +120,48 @@ class CombineExtension : ExtensionClient, MusicExtensionsProvider,
         return getSelectedExtension(KEY_METADATA_EXT)
     }
 
-    private suspend fun getStreamExtension(): MusicExtension {
-        return getSelectedExtension(KEY_STREAM_EXT)
+    private suspend fun getStreamExtensions(): List<MusicExtension> {
+        val exts = awaitExtensions()
+        val result = mutableListOf<MusicExtension>()
+
+        fun findExt(id: String?): MusicExtension? {
+            if (id == null || id == "none") return null
+            return exts.find { it.id == id || it.name == id }
+        }
+
+        // Handle migration from previous versions/formats
+        val selectedSet = runCatching { settings.getStringSet(KEY_STREAM_EXT) }.getOrNull()
+        if (!selectedSet.isNullOrEmpty()) {
+            return exts.filter { it.id in selectedSet }
+        }
+
+        // Primary
+        findExt(runCatching { settings.getString(KEY_STREAM_EXT) }.getOrNull())?.let { result.add(it) }
+
+        // Alternatives
+        for (i in 1..5) {
+            val id = runCatching { settings.getString("${KEY_STREAM_EXT}_$i") }.getOrNull()
+            findExt(id)?.let { result.add(it) } ?: break
+        }
+
+        if (result.isEmpty() && exts.isNotEmpty()) {
+            result.add(exts.first())
+        }
+        return result.distinctBy { it.id }
     }
 
     private suspend fun getSelectedExtension(key: String): MusicExtension {
         val exts = awaitExtensions()
-        val selectedValue = settings.getString(key)
+        val selectedValue = runCatching { settings.getString(key) }.getOrNull()
 
-        if (selectedValue == null) return exts.firstOrNull() ?: throw Exception("No music extensions installed")
+        if (selectedValue == null) {
+            val setValues = runCatching { settings.getStringSet(key) }.getOrNull()
+            if (!setValues.isNullOrEmpty()) {
+                val match = exts.find { it.id in setValues }
+                if (match != null) return match
+            }
+            return exts.firstOrNull() ?: throw Exception("No music extensions installed")
+        }
 
         val match = exts.find { it.id == selectedValue || it.name == selectedValue }
         if (match != null) return match
@@ -154,41 +214,32 @@ class CombineExtension : ExtensionClient, MusicExtensionsProvider,
         val metaClient = metaExt.client<TrackClient>()
         val metaTrack = metaClient.loadTrack(track, isDownload)
 
-        val streamExt = getStreamExtension()
-        if (metaExt.id == streamExt.id) {
-            return metaTrack
+        val allStreamables = metaTrack.streamables.toMutableList()
+
+        for (streamExt in getStreamExtensions()) {
+            if (streamExt.id == metaExt.id) continue
+            val streamTrack = findTrackInStreamExtension(metaTrack, streamExt)
+            if (streamTrack != null) {
+                allStreamables.addAll(streamTrack.streamables)
+            }
         }
 
-        val streamTrack = findTrackInStreamExtension(metaTrack)
-        return if (streamTrack != null) {
-            metaTrack.copy(
-                streamables = streamTrack.streamables,
-                extras = metaTrack.extras + mapOf(
-                    "stream_ext_id" to streamExt.id,
-                    "stream_track_id" to streamTrack.id
-                )
-            )
-        } else {
-            metaTrack
-        }
+        return metaTrack.copy(streamables = allStreamables)
     }
 
     override suspend fun loadStreamableMedia(
         streamable: Streamable, isDownload: Boolean
     ): Streamable.Media {
         val streamExtId = streamable.extras["stream_ext_id"]
-        if (streamExtId != null) {
-            val exts = awaitExtensions()
-            val ext = exts.find { it.id == streamExtId }
-            if (ext != null) {
-                val client = ext.client<TrackClient>()
-                return client.loadStreamableMedia(streamable, isDownload)
-            }
+        val exts = awaitExtensions()
+        val ext = if (streamExtId != null) {
+            exts.find { it.id == streamExtId }
+        } else {
+            getMetadataExtension()
         }
 
-        val streamExt = getStreamExtension()
-        val streamClient = streamExt.client<TrackClient>()
-        return streamClient.loadStreamableMedia(streamable, isDownload)
+        val client = ext?.client<TrackClient>() ?: throw Exception("Extension not found")
+        return client.loadStreamableMedia(streamable, isDownload)
     }
 
     override suspend fun loadFeed(track: Track): Feed<Shelf>? {
@@ -197,8 +248,7 @@ class CombineExtension : ExtensionClient, MusicExtensionsProvider,
         return client.loadFeed(track)
     }
 
-    private suspend fun findTrackInStreamExtension(metaTrack: Track): Track? {
-        val streamExt = getStreamExtension()
+    private suspend fun findTrackInStreamExtension(metaTrack: Track, streamExt: MusicExtension): Track? {
         val searchClient: SearchFeedClient = try {
             streamExt.client()
         } catch (_: Exception) {

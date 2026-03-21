@@ -9,6 +9,8 @@ import dev.brahmkshatriya.echo.common.clients.HideClient
 import dev.brahmkshatriya.echo.common.clients.HomeFeedClient
 import dev.brahmkshatriya.echo.common.clients.LibraryFeedClient
 import dev.brahmkshatriya.echo.common.clients.LikeClient
+import dev.brahmkshatriya.echo.common.clients.LyricsClient
+import dev.brahmkshatriya.echo.common.clients.LyricsSearchClient
 import dev.brahmkshatriya.echo.common.clients.PlaylistClient
 import dev.brahmkshatriya.echo.common.clients.PlaylistEditClient
 import dev.brahmkshatriya.echo.common.clients.RadioClient
@@ -22,6 +24,7 @@ import dev.brahmkshatriya.echo.common.models.Artist
 import dev.brahmkshatriya.echo.common.models.EchoMediaItem
 import dev.brahmkshatriya.echo.common.models.Feed
 import dev.brahmkshatriya.echo.common.models.Feed.Companion.toFeed
+import dev.brahmkshatriya.echo.common.models.Lyrics
 import dev.brahmkshatriya.echo.common.models.Playlist
 import dev.brahmkshatriya.echo.common.models.Radio
 import dev.brahmkshatriya.echo.common.models.Shelf
@@ -38,7 +41,7 @@ class CombineExtension : ExtensionClient, MusicExtensionsProvider,
     HomeFeedClient, SearchFeedClient, TrackClient,
     AlbumClient, ArtistClient, PlaylistClient, PlaylistEditClient,
     SaveClient, LikeClient, ShareClient, FollowClient, HideClient, RadioClient,
-    LibraryFeedClient {
+    LibraryFeedClient, LyricsSearchClient {
 
     companion object {
         const val COMBINE_ID = "echo_combine"
@@ -159,17 +162,21 @@ class CombineExtension : ExtensionClient, MusicExtensionsProvider,
             return metaTrack
         }
 
+        val metaStreamables = metaTrack.streamables.map { s ->
+            s.copy(extras = s.extras + mapOf("stream_ext_id" to metaExt.id))
+        }
+
         val streamTrack = findTrackInStreamExtension(metaTrack)
         return if (streamTrack != null) {
             metaTrack.copy(
-                streamables = streamTrack.streamables,
+                streamables = metaStreamables.filter { it.type != Streamable.MediaType.Server } + streamTrack.streamables,
                 extras = metaTrack.extras + mapOf(
                     "stream_ext_id" to streamExt.id,
                     "stream_track_id" to streamTrack.id
                 )
             )
         } else {
-            metaTrack
+            metaTrack.copy(streamables = metaStreamables)
         }
     }
 
@@ -452,5 +459,27 @@ class CombineExtension : ExtensionClient, MusicExtensionsProvider,
         val client = getMetadataExtension().clientOrNull<RadioClient>()
             ?: throw Exception("The selected metadata extension does not support radio.")
         return client.loadTracks(radio)
+    }
+
+    // --- LyricsClient ---
+
+    override suspend fun searchTrackLyrics(clientId: String, track: Track): Feed<Lyrics> {
+        val client = getMetadataExtension().clientOrNull<LyricsClient>()
+            ?: return emptyList<Lyrics>().toFeed()
+        return client.searchTrackLyrics(clientId, track)
+    }
+
+    override suspend fun loadLyrics(lyrics: Lyrics): Lyrics {
+        val client = getMetadataExtension().clientOrNull<LyricsClient>()
+            ?: return lyrics
+        return client.loadLyrics(lyrics)
+    }
+
+    // --- LyricsSearchClient ---
+
+    override suspend fun searchLyrics(query: String): Feed<Lyrics> {
+        val client = getMetadataExtension().clientOrNull<LyricsSearchClient>()
+            ?: return emptyList<Lyrics>().toFeed()
+        return client.searchLyrics(query)
     }
 }

@@ -28,7 +28,7 @@ import kotlin.system.measureTimeMillis
 @OptIn(DelicateCoroutinesApi::class)
 @ExperimentalCoroutinesApi
 class ExtensionUnitTest {
-    private val extension: ExtensionClient = TestExtension()
+    private val extension: ExtensionClient = CombineExtension()
     private val searchQuery = "Skrillex"
     private val user = User("", "Test User")
 

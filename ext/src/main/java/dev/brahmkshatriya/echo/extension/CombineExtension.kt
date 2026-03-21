@@ -29,7 +29,12 @@ import dev.brahmkshatriya.echo.common.models.Track
 import dev.brahmkshatriya.echo.common.providers.MusicExtensionsProvider
 import dev.brahmkshatriya.echo.common.settings.Setting
 import dev.brahmkshatriya.echo.common.settings.SettingList
+import dev.brahmkshatriya.echo.common.settings.SettingSwitch
 import dev.brahmkshatriya.echo.common.settings.Settings
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 
@@ -43,6 +48,7 @@ class CombineExtension : ExtensionClient, MusicExtensionsProvider,
         const val COMBINE_ID = "echo_combine"
         const val KEY_METADATA_EXT = "metadata_extension"
         const val KEY_STREAM_EXT = "stream_extension"
+        const val KEY_FIRST_AVAILABLE = "first_available"
     }
 
     private lateinit var settings: Settings
@@ -67,6 +73,12 @@ class CombineExtension : ExtensionClient, MusicExtensionsProvider,
                 extNames,
                 extIds,
                 0
+            ),
+            SettingSwitch(
+                "First Available Mode",
+                KEY_FIRST_AVAILABLE,
+                "Return only streams from the first extension that responds (faster)",
+                false
             ),
             SettingList(
                 "Preferred Stream Extension",
@@ -123,6 +135,7 @@ class CombineExtension : ExtensionClient, MusicExtensionsProvider,
     private suspend fun getStreamExtensions(): List<MusicExtension> {
         val exts = awaitExtensions()
         val result = mutableListOf<MusicExtension>()
+        val metaExt = getMetadataExtension()
 
         fun findExt(id: String?): MusicExtension? {
             if (id == null || id == "none") return null
@@ -142,6 +155,11 @@ class CombineExtension : ExtensionClient, MusicExtensionsProvider,
         for (i in 1..5) {
             val id = runCatching { settings.getString("${KEY_STREAM_EXT}_$i") }.getOrNull()
             findExt(id)?.let { result.add(it) } ?: break
+        }
+
+        // Add Metadata extension as fallback at the end
+        if (result.none { it.id == metaExt.id }) {
+            result.add(metaExt)
         }
 
         if (result.isEmpty() && exts.isNotEmpty()) {
@@ -214,17 +232,49 @@ class CombineExtension : ExtensionClient, MusicExtensionsProvider,
         val metaClient = metaExt.client<TrackClient>()
         val metaTrack = metaClient.loadTrack(track, isDownload)
 
-        val allStreamables = metaTrack.streamables.toMutableList()
+        val streamExts = getStreamExtensions()
+        val isFirstAvailable = settings.getBoolean(KEY_FIRST_AVAILABLE) == true
 
-        for (streamExt in getStreamExtensions()) {
-            if (streamExt.id == metaExt.id) continue
-            val streamTrack = findTrackInStreamExtension(metaTrack, streamExt)
-            if (streamTrack != null) {
-                allStreamables.addAll(streamTrack.streamables)
+        val allStreamables = if (isFirstAvailable) {
+            selectFirstFoundPrioritized(metaTrack, streamExts, metaExt) ?: metaTrack.streamables
+        } else {
+            coroutineScope {
+                val deferreds = streamExts.map { ext ->
+                    if (ext.id == metaExt.id) {
+                        async { metaTrack.streamables }
+                    } else {
+                        async { findTrackInStreamExtension(metaTrack, ext)?.streamables ?: emptyList() }
+                    }
+                }
+                deferreds.awaitAll().flatten()
             }
         }
 
         return metaTrack.copy(streamables = allStreamables)
+    }
+
+    private suspend fun selectFirstFoundPrioritized(
+        metaTrack: Track,
+        exts: List<MusicExtension>,
+        metaExt: MusicExtension
+    ): List<Streamable>? = coroutineScope {
+        val deferreds = exts.map { ext ->
+            if (ext.id == metaExt.id) {
+                async { metaTrack.streamables.ifEmpty { null } }
+            } else {
+                async { findTrackInStreamExtension(metaTrack, ext)?.streamables?.ifEmpty { null } }
+            }
+        }
+
+        // Wait in priority order, but all are running in parallel
+        for (deferred in deferreds) {
+            val res = deferred.await()
+            if (!res.isNullOrEmpty()) {
+                deferreds.forEach { it.cancel() }
+                return@coroutineScope res
+            }
+        }
+        null
     }
 
     override suspend fun loadStreamableMedia(

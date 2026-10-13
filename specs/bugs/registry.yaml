@@ -1,0 +1,9 @@
+bugs:
+  - bug_id: BUG-008
+    date: '2026-10-14'
+    severity: medium
+    priority: high
+    scope: track-matching
+    summary: Parenthesized with credits prevent cross-provider title matching
+    file: specs/bugs/BUG-008-with-credits.md
+    status: investigating

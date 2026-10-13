@@ -25,6 +25,7 @@ class ExtensionUnitTest {
 
         var streamLoads = 0
         var searches = 0
+        var lastQuery: String? = null
         var loadFailure: Exception? = null
         var searchFailure: Exception? = null
         var mediaFailure: Exception? = null
@@ -37,6 +38,7 @@ class ExtensionUnitTest {
 
         override suspend fun loadSearchFeed(query: String): Feed<Shelf> {
             searches++
+            lastQuery = query
             beforeSearch()
             searchFailure?.let { throw it }
             searchFeed?.let { return it }
@@ -375,6 +377,61 @@ class ExtensionUnitTest {
         val candidate = track("Don’t Stop", "MAIN ARTIST", "correct")
         val combine = combine(settings(), "metadata" to Provider(), "audio" to Provider(listOf(candidate)))
         assertEquals("correct", combine.loadTrack(wanted, false).servers.single().id)
+    }
+
+    @Test
+    fun issue8MatchesDreamvilleWithCreditsWithoutLosingVersionsOrArtists() = runTest {
+        // Public Spotify album 2n3quCZ0anEa46j2IveacI / Deezer album 102427652.
+        val albumTitles = listOf(
+            "Under The Sun (with J. Cole & Lute feat. DaBaby)" to "Under The Sun",
+            "Down Bad (feat. JID, Bas, J. Cole, EARTHGANG & Young Nudy)" to "Down Bad",
+            "LamboTruck (with Cozz feat. REASON & Childish Major)" to "LamboTruck",
+            "Swivel (with EARTHGANG) - From The Album \"Mirrorland\"" to "Swivel (From The Album \"Mirrorland\")",
+            "Oh Wow...Swerve (with J. Cole feat. Zoink Gang, KEY! & Maxo Kream)" to "Oh Wow...Swerve",
+            "Don't Hit Me Right Now (with Bas & Cozz feat. Yung Baby Tate, Guapdad 4000 & Buddy)" to "Don't Hit Me Right Now",
+            "Wells Fargo (with JID & EARTHGANG feat. Buddy & Guapdad 4000) - Interlude" to "Wells Fargo (Interlude)",
+            "Sleep Deprived (with Lute & Omen feat. Mez & DaVionne)" to "Sleep Deprived",
+            "Self Love (with Ari Lennox & Bas feat. Baby Rose)" to "Self Love",
+            "Ladies, Ladies, Ladies (with JID feat. T.I.)" to "Ladies, Ladies, Ladies",
+            "Costa Rica (with Bas & JID feat. Guapdad 4000, Reese LAFLARE, Jace, Mez, Smokepurpp, Buddy & Ski Mask The Slump God)" to "Costa Rica",
+            "1993 (with J. Cole, JID, Cozz & EARTHGANG feat. Smino & Buddy)" to "1993",
+            "Rembrandt...Run It Back (with JID & J. Cole feat. Vince Staples)" to "Rembrandt...Run It Back",
+            "Sunset (with J. Cole feat. Young Nudy)" to "Sunset",
+            "Got Me (with Ari Lennox & Omen feat. Ty Dolla \$ign & Dreezy)" to "Got Me",
+            "MIDDLE CHILD" to "MIDDLE CHILD",
+            "PTSD (with Omen feat. Mereba, Deante' Hitchcock & St. Beauty)" to "PTSD",
+            "Sacrifices (with EARTHGANG & J. Cole feat. Smino & Saba)" to "Sacrifices"
+        )
+        val versionTitles = listOf(
+            "Song (with Guest) - Acoustic" to "Song (Acoustic)",
+            "Song (Live) (with Guest)" to "Song - Live",
+            "Song [WITH Guest] (Remix)" to "Song - Remix",
+            "Song (with Guest) - Interlude" to "Song (Interlude)",
+            "With A Little Help From My Friends" to "With A Little Help From My Friends",
+            "Love With You" to "Love With You"
+        )
+        val titles = albumTitles + versionTitles
+        for (firstAvailable in listOf(false, true)) {
+            for ((wantedTitle, audioTitle) in titles + titles.map { (a, b) -> b to a }) {
+                val artist = if (wantedTitle == "MIDDLE CHILD") "J. Cole" else "Dreamville"
+                val wanted = track(wantedTitle, artist)
+                val audio = Provider(listOf(
+                    track(audioTitle, "Other Artist", "wrong-artist"),
+                    track("Song", artist, "studio"),
+                    track("Song (Instrumental)", artist, "different-version"),
+                    track(audioTitle, artist, "correct")
+                ))
+                val metadata = Provider()
+                val combine = combine(settings(firstAvailable), "metadata" to metadata, "audio" to audio)
+                val loaded = combine.loadTrack(wanted, false)
+                assertEquals(wantedTitle, "correct", loaded.servers.singleOrNull()?.id)
+                assertFalse("Unclean search: ${audio.lastQuery}", audio.lastQuery!!.contains("(with ", true))
+                assertFalse("Unclean search: ${audio.lastQuery}", audio.lastQuery!!.contains("[with ", true))
+                val media = combine.loadStreamableMedia(loaded.servers.single(), false) as Streamable.Media.Server
+                assertEquals("https://test/correct", (media.sources.single() as Streamable.Source.Http).request.url)
+                assertEquals(0, metadata.streamLoads)
+            }
+        }
     }
 
     @Test

@@ -1,0 +1,148 @@
+name: Bug report
+description: Report incorrect matching, playback failures, crashes, or other defects.
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem and include your provider setup so we can reproduce it.
+        Check existing issues before submitting a new report.
+        Do not include passwords, tokens, cookies, account identifiers, or private stream URLs.
+
+  - type: dropdown
+    id: release_channel
+    attributes:
+      label: Release channel
+      options:
+        - Stable (main)
+        - Nightly
+        - Local build
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: combine_version
+    attributes:
+      label: Combine version
+      description: Copy the full version from Echo's extension information screen.
+      placeholder: "For example: nightly-928ea66 or v18b5da3"
+    validations:
+      required: true
+
+  - type: input
+    id: echo_version
+    attributes:
+      label: Echo version
+      description: Include the version and whether you use stable or nightly Echo.
+      placeholder: "For example: v3.0.725, nightly"
+    validations:
+      required: true
+
+  - type: textarea
+    id: provider_setup
+    attributes:
+      label: Providers and priority order
+      description: Include provider names and versions. List audio providers in their configured order.
+      placeholder: |
+        Metadata: name / version
+        Preferred audio: name / version
+        2nd audio: name / version, or None
+        Further backups: names / versions in order, or None
+    validations:
+      required: true
+
+  - type: dropdown
+    id: first_available
+    attributes:
+      label: First Available mode
+      options:
+        - "On"
+        - "Off"
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include where playback starts, such as Home, Search, Library, or a playlist.
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. Play ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+      description: Describe what you expected Combine to do.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Actual behavior
+      description: Describe what happened, including any error shown by Echo.
+    validations:
+      required: true
+
+  - type: textarea
+    id: affected_item
+    attributes:
+      label: Track or library item
+      description: For matching problems, include both the requested track and the incorrect provider result. Omit private links.
+      placeholder: |
+        Metadata title and artist:
+        Requested version (studio, acoustic, live, remix, etc.):
+        Audio provider's result title and artist:
+        Album or playlist, if relevant:
+    validations:
+      required: false
+
+  - type: dropdown
+    id: direct_provider_test
+    attributes:
+      label: Does the same item work directly in the provider, without Combine?
+      description: Test the affected metadata or audio provider. Identify that provider in Actual behavior.
+      options:
+        - "Yes"
+        - "No"
+        - Not tested
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Device and Android version
+      description: Include your phone model and Android version, if relevant.
+      placeholder: "For example: phone model, Android 16"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error log or stack trace
+      description: Paste relevant errors only. Remove account information, credentials, and URL tokens first.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: report_checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked existing issues for a similar report.
+          required: true
+        - label: I did not include passwords, tokens, cookies, or account identifiers.
+          required: true

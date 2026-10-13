@@ -57,7 +57,7 @@ class CombineExtension : ExtensionClient, MusicExtensionsProvider,
         private const val MATCH_TRACK = "combine_match_track"
 
         private val AUDIO_EXTENSION = Regex("\\.(?:m4a|mp3|flac|ogg|opus|wav|aac)$", RegexOption.IGNORE_CASE)
-        private val FEATURE_BRACKETS = Regex("[\\[(]\\s*(?:feat\\.?|ft\\.?|featuring)\\s+[^\\])]*[\\])]", RegexOption.IGNORE_CASE)
+        private val FEATURE_BRACKETS = Regex("[\\[(]\\s*(?:feat\\.?|ft\\.?|featuring|with)\\s+[^\\])]*[\\])]", RegexOption.IGNORE_CASE)
         private val FEATURE_SUFFIX = Regex("\\s+(?:feat\\.?|ft\\.?|featuring)\\s+.*?(?=\\s[-–—]\\s|[\\[(]|$)", RegexOption.IGNORE_CASE)
     }
 

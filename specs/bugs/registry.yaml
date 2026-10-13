@@ -6,4 +6,11 @@ bugs:
     scope: track-matching
     summary: Parenthesized with credits prevent cross-provider title matching
     file: specs/bugs/BUG-008-with-credits.md
-    status: investigating
+    status: fixed
+    approach: Add with to shared bracketed-credit normalization
+    risk_level: low
+    files_changed:
+      - ext/src/main/java/dev/brahmkshatriya/echo/extension/CombineExtension.kt
+      - ext/src/test/java/dev/brahmkshatriya/echo/extension/ExtensionUnitTest.kt
+    commit_message: 'fix(matching): accept bracketed with credits across providers'
+    live_playback: pending reporter confirmation

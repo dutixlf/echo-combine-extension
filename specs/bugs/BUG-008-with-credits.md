@@ -38,5 +38,17 @@ Catalog sources:
 
 ## Resolution
 
-Pending the RED/GREEN checks. Live playback with actual providers still requires
-confirmation from the issue reporter.
+The regression failed on `Under The Sun (with …)` before the fix (test commit
+`91be818`). Adding `with` to bracketed credits makes it pass. All 20 tests pass,
+including 72 album-pair checks (18 titles, both directions, both modes), plus
+version-label and artist checks. The Shadow JAR builds successfully.
+The release metadata tests, four assignment tests, and actionlint also pass.
+A repeat comparison using the public catalog snapshots matches 18/18 titles,
+up from 2/18. This is catalog and provider-boundary evidence, not live playback.
+
+Defect-class sweep: bracketed credit normalization has one shared definition;
+all three search/comparison callers use it. No sibling cleaner needs patching.
+No dependencies, API contracts, or buffering behavior changed.
+
+Commit: `fix(matching): accept bracketed with credits across providers`.
+Live playback with actual providers still requires confirmation from the reporter.

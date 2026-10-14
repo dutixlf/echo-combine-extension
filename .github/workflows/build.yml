@@ -1,71 +1,99 @@
-name: nightly
+name: releases
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, nightly]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to build
+        type: choice
+        options: [nightly, main]
+        default: nightly
+        required: true
+  schedule:
+    - cron: '0 0 * * *'
+
+permissions:
+  contents: write
+
+env:
+  BUILD_BRANCH: ${{ github.event_name == 'schedule' && 'nightly' || github.event_name == 'workflow_dispatch' && inputs.branch || github.ref_name }}
+
+concurrency:
+  group: release-${{ github.event_name == 'schedule' && 'nightly' || github.event_name == 'workflow_dispatch' && inputs.branch || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   build:
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && (inputs.branch == 'main' || inputs.branch == 'nightly')) ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly'))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Checkout repo
+      - name: Checkout build source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.sha || env.BUILD_BRANCH }}
+          fetch-depth: 0
 
       - name: Setup JDK 21
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: zulu
           java-version: 21
-          cache: 'gradle'
+          cache: gradle
 
-      - name: Cook Variables from gradle.properties
-        run : |
-          name=$(grep '^extName=' gradle.properties | cut -d'=' -f2)
-          echo "NAME=$name Extension" >> $GITHUB_ENV
-          id=$(grep '^extId=' gradle.properties | cut -d'=' -f2)
-          echo "TAG=$id" >> $GITHUB_ENV
-
-      - name: Make Environment
+      - name: Verify
         run: |
-          version=$( echo "${{ github.event.head_commit.id }}" | cut -c1-7 )
-          echo "VERSION=v$version" >> $GITHUB_ENV
-          echo "NAME_EXT=${{ env.NAME }} Extension" >> $GITHUB_ENV
-          echo -e "## ${{ env.NAME }}\n${{ github.event.head_commit.message }}" > commit.txt
-          echo "APP_PATH=app/build/${{ env.TAG }}-$version.eapk" >> $GITHUB_ENV
-          echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > "$GITHUB_WORKSPACE/signing-key.jks"
-          chmod +x ./gradlew
+          bash .github/scripts/test-release-metadata.sh
+          node .github/scripts/test-autoassign.mjs
+          bash ./gradlew :ext:check --no-daemon
 
-      - name: Build with Gradle
+      - name: Prepare release metadata
+        run: bash .github/scripts/prepare-release.sh
+
+      - name: Build signed extension
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.PASSWORD }}
         run: |
-          ./gradlew assembleDebug \
-          -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/signing-key.jks" \
-          -Pandroid.injected.signing.store.password="${{ secrets.PASSWORD }}" \
-          -Pandroid.injected.signing.key.alias="key0" \
-          -Pandroid.injected.signing.key.password="${{ secrets.PASSWORD }}"
-          
-          mkdir -p app/build
-          cp app/build/outputs/apk/debug/app-debug.apk ${{ env.APP_PATH }}
+          set -euo pipefail
+          : "${KEYSTORE_B64:?Set the KEYSTORE_B64 repository secret}"
+          : "${STORE_PASSWORD:?Set the PASSWORD repository secret}"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$GITHUB_WORKSPACE/signing-key.jks"
+          chmod 600 "$GITHUB_WORKSPACE/signing-key.jks"
+          bash ./gradlew :app:assembleDebug --no-daemon \
+            "-PextVersionName=$VERSION" \
+            "-PextName=$EXT_NAME" \
+            "-PextUpdateUrl=$UPDATE_URL" \
+            "-Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/signing-key.jks" \
+            "-Pandroid.injected.signing.store.password=$STORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias=key0 \
+            "-Pandroid.injected.signing.key.password=$STORE_PASSWORD"
+          cp app/build/outputs/apk/debug/app-debug.apk "$APP_PATH"
 
-      - name: Upload APK
+      - name: Upload extension artifact
         uses: actions/upload-artifact@v4
         with:
+          name: echo-combine-${{ env.VERSION }}
           path: ${{ env.APP_PATH }}
+          if-no-files-found: error
 
-      - name: Create Release
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          make_latest: true
           tag_name: ${{ env.VERSION }}
-          body_path: commit.txt
+          target_commitish: ${{ env.COMMIT_SHA }}
           name: ${{ env.VERSION }}
+          prerelease: ${{ env.BUILD_BRANCH == 'nightly' }}
+          make_latest: ${{ env.BUILD_BRANCH == 'main' && 'true' || 'false' }}
+          body_path: ${{ env.NOTES_PATH }}
           files: ${{ env.APP_PATH }}
+          fail_on_unmatched_files: true
 
-      - name: Delete Old Releases
-        uses: sgpublic/delete-release-action@master
-        with:
-          release-drop: true
-          release-keep-count: 2
-          release-drop-tag: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$GITHUB_WORKSPACE/signing-key.jks"

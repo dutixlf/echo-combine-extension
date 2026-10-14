@@ -1,0 +1,69 @@
+name: Feature request
+description: Suggest a new capability or an improvement to Combine.
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem you want to solve, then explain the proposed behavior.
+        Check existing issues before submitting a new request.
+        Do not include account identifiers, credentials, or private stream URLs.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe a concrete situation where the current behavior does not meet your needs.
+      placeholder: "When I ..., I need ..., but Combine currently ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain what you want Combine to do and how it improves your workflow.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area of improvement
+      options:
+        - Audio providers or fallback
+        - Track matching
+        - Metadata or library actions
+        - Settings
+        - Builds or repository automation
+        - Documentation
+        - Other
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+      description: Describe existing settings, other tools, or approaches that you tried.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add relevant provider versions, examples, screenshots, or documentation links. Remove private information first.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: request_checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked existing issues for a similar request.
+          required: true
+        - label: I did not include passwords, tokens, cookies, or account identifiers.
+          required: true
